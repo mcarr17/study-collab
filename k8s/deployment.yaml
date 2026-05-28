@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai-study-collab
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ai-study-collab
+  template:
+    metadata:
+      labels:
+        app: ai-study-collab
+    spec:
+      containers:
+        - name: app
+          image: gcr.io/YOUR_GCP_PROJECT/ai-study-collab:latest
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - secretRef:
+                name: ai-study-collab-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai-study-collab-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: ai-study-collab
+  ports:
+    - port: 80
+      targetPort: 8080

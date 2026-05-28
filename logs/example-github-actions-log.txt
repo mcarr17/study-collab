@@ -1,0 +1,2 @@
+Placeholder: Replace this file with real GitHub Actions logs after a successful build and deployment.
+Required evidence should show npm install, build, lint/test, container build, and kubectl rollout status.
