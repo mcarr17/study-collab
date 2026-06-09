@@ -13,8 +13,13 @@ import { verifyToken } from './middleware/auth.js';
 
 const app = express();
 const server = http.createServer(app);
-const allowedOrigin = process.env.CLIENT_ORIGIN || 'http://localhost:5173';
-const io = new Server(server, { cors: { origin: allowedOrigin, credentials: true } });
+const allowedOrigin = [
+  process.env.CLIENT_ORIGIN || 'http://localhost:5173',
+  'http://192.168.254.18:5173',
+];
+const io = new Server(server, {
+  cors: { origin: allowedOrigin, credentials: true }
+});
 
 app.set('io', io);
 app.use(helmet({ contentSecurityPolicy: false }));
