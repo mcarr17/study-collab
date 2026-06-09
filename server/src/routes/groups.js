@@ -29,4 +29,15 @@ router.post('/:groupId/notes', async (req, res) => {
   res.status(201).json(note);
 });
 
+router.delete('/:groupId', async (req, res) => {
+  const deleted = await store.deleteGroup(req.params.groupId, req.user.id);
+
+  if (!deleted) {
+    return res.status(404).json({ error: 'Group not found' });
+  }
+
+  req.app.get('io').emit('server-notification', { text: 'Study group deleted' });
+  res.json({ ok: true });
+});
+
 export default router;

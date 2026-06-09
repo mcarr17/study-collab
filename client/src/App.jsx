@@ -18,13 +18,54 @@ function Login({ onLogin }) {
     <section className="w-full max-w-md rounded-2xl bg-white/10 p-6 shadow-xl" aria-labelledby="login-title">
       <h1 id="login-title" className="text-3xl font-bold">AI Study Collab</h1>
       <p className="mt-2 text-slate-200">Collaborative notes, AI summaries, offline drafts, and realtime group updates.</p>
+
       <form onSubmit={submit} className="mt-6 grid gap-3">
-        {mode === 'register' && <label>Name<input className="mt-1 w-full rounded p-3 text-black" value={form.name} onChange={e => setForm({...form, name:e.target.value})} required /></label>}
-        <label>Email<input type="email" className="mt-1 w-full rounded p-3 text-black" value={form.email} onChange={e => setForm({...form, email:e.target.value})} required /></label>
-        <label>Password<input type="password" minLength="8" className="mt-1 w-full rounded p-3 text-black" value={form.password} onChange={e => setForm({...form, password:e.target.value})} required /></label>
-        <button className="rounded bg-blue-500 p-3 font-semibold hover:bg-blue-400">{mode === 'register' ? 'Create account' : 'Log in'}</button>
+        {mode === 'register' && (
+          <label>
+            Name
+            <input
+              className="mt-1 w-full rounded p-3 text-black"
+              value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              required
+            />
+          </label>
+        )}
+
+        <label>
+          Email
+          <input
+            type="email"
+            className="mt-1 w-full rounded p-3 text-black"
+            value={form.email}
+            onChange={e => setForm({ ...form, email: e.target.value })}
+            required
+          />
+        </label>
+
+        <label>
+          Password
+          <input
+            type="password"
+            minLength="8"
+            className="mt-1 w-full rounded p-3 text-black"
+            value={form.password}
+            onChange={e => setForm({ ...form, password: e.target.value })}
+            required
+          />
+        </label>
+
+        <button className="rounded bg-blue-500 p-3 font-semibold hover:bg-blue-400">
+          {mode === 'register' ? 'Create account' : 'Log in'}
+        </button>
       </form>
-      <button className="mt-4 underline" onClick={() => setMode(mode === 'register' ? 'login' : 'register')}>Switch to {mode === 'register' ? 'login' : 'register'}</button>
+
+      <button
+        className="mt-4 underline"
+        onClick={() => setMode(mode === 'register' ? 'login' : 'register')}
+      >
+        Switch to {mode === 'register' ? 'login' : 'register'}
+      </button>
     </section>
   </main>;
 }
@@ -34,6 +75,7 @@ function CanvasBoard() {
     const canvas = document.getElementById('study-canvas');
     const ctx = canvas.getContext('2d');
     let drawing = false;
+
     const pos = e => ({ x: e.offsetX, y: e.offsetY });
 
     canvas.onpointerdown = e => {
@@ -50,12 +92,20 @@ function CanvasBoard() {
       ctx.stroke();
     };
 
-    canvas.onpointerup = () => drawing = false;
+    canvas.onpointerup = () => {
+      drawing = false;
+    };
   }, []);
 
   return <article className="rounded-2xl bg-white p-4 shadow" aria-labelledby="canvas-title">
     <h2 id="canvas-title" className="font-bold">Canvas scratch board</h2>
-    <canvas id="study-canvas" width="480" height="180" className="mt-2 w-full rounded border" aria-label="Drawable study scratch board"></canvas>
+    <canvas
+      id="study-canvas"
+      width="480"
+      height="180"
+      className="mt-2 w-full rounded border"
+      aria-label="Drawable study scratch board"
+    />
   </article>;
 }
 
@@ -66,6 +116,10 @@ function Dashboard({ onLogout }) {
   const [summary, setSummary] = useState('');
   const [toast, setToast] = useState('');
   const [offline, setOffline] = useState(!navigator.onLine);
+  const [groupForm, setGroupForm] = useState({ name: '', course: '' });
+  const [savedNotes, setSavedNotes] = useState([]);
+  const [groupDrafts, setGroupDrafts] = useState({});
+
   const socket = useMemo(() => io(API, { auth: { token: getToken() } }), []);
 
   useEffect(() => {
@@ -85,44 +139,109 @@ function Dashboard({ onLogout }) {
     };
   }, []);
 
-  async function createGroup() {
+  function selectGroup(group) {
+    if (active) {
+      setGroupDrafts(prev => ({
+        ...prev,
+        [active.id]: note
+      }));
+    }
+  
+    setActive(group);
+    setNote(groupDrafts[group.id] || { title: 'Lecture Notes', body: '' });
+    setSummary('');
+    socket.emit('join-group', group.id);
+    setToast(`Selected group: ${group.name}`);
+  }
+
+  async function deleteGroup(groupId) {
+    const ok = window.confirm('Delete this group? This cannot be undone.');
+    if (!ok) return;
+  
+    try {
+      await api(`/api/groups/${groupId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.warn('Backend delete failed, removing from UI only for now.');
+    }
+  
+    setGroups(groups.filter(g => g.id !== groupId));
+    setSavedNotes(savedNotes.filter(n => n.groupId !== groupId));
+  
+    if (active?.id === groupId) {
+      setActive(null);
+      setNote({ title: 'Lecture Notes', body: '' });
+      setSummary('');
+    }
+  
+    setToast('Group deleted');
+  }
+
+  async function createGroup(e) {
+    e.preventDefault();
+
+    if (!groupForm.name.trim() || !groupForm.course.trim()) {
+      setToast('Enter a group name and course first');
+      return;
+    }
+
     const group = await api('/api/groups', {
-      method:'POST',
-      body: JSON.stringify({ name: 'CS 144 Final Team', course: 'CS 144' })
+      method: 'POST',
+      body: JSON.stringify({
+        name: groupForm.name.trim(),
+        course: groupForm.course.trim()
+      })
     });
 
     setGroups([...groups, group]);
     setActive(group);
+    setNote({ title: 'Lecture Notes', body: '' });
+    setGroupForm({ name: '', course: '' });
     socket.emit('join-group', group.id);
+    setToast(`New study group created: ${group.name}`);
   }
 
   async function saveNote() {
-    if (!active) return;
+    if (!active) {
+      setToast('Select a group before saving a note');
+      return;
+    }
+
+    if (!note.body.trim()) {
+      setToast('Write some notes before saving');
+      return;
+    }
 
     const payload = { ...note, groupId: active.id };
 
     if (offline) {
       const queued = JSON.parse(localStorage.getItem('queuedNotes') || '[]');
       localStorage.setItem('queuedNotes', JSON.stringify([...queued, payload]));
+      setSavedNotes([...savedNotes, payload]);
       setToast('Offline: note queued for later sync');
       return;
     }
 
     await api(`/api/groups/${active.id}/notes`, {
-      method:'POST',
+      method: 'POST',
       body: JSON.stringify(payload)
     });
 
+    setSavedNotes([...savedNotes, payload]);
     setToast('Note saved and pushed to your group');
   }
 
   async function summarize() {
+    if (!note.body.trim()) {
+      setToast('Write notes before using AI summarize');
+      return;
+    }
+
     const data = await api('/api/ai/summarize', {
-      method:'POST',
+      method: 'POST',
       body: JSON.stringify({ text: note.body })
     });
 
-    setSummary(data.summary || data.quiz?.join('\n'));
+    setSummary(data.summary || data.quiz?.join('\n') || 'No summary returned.');
   }
 
   return <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -149,42 +268,111 @@ function Dashboard({ onLogout }) {
     <section className="mx-auto grid max-w-6xl gap-4 p-4 md:grid-cols-[280px_1fr]">
       <aside className="rounded-2xl bg-white p-4 shadow">
         <h2 className="font-bold">Groups</h2>
-        <button onClick={createGroup} className="my-3 w-full rounded bg-blue-700 p-3 text-white">Create demo group</button>
 
-        {groups.map(g => (
-          <button
-            key={g.id}
-            onClick={() => {
-              setActive(g);
-              socket.emit('join-group', g.id);
-            }}
-            className="block w-full rounded p-2 text-left hover:bg-slate-100"
-          >
-            {g.name}<br/><small>{g.course}</small>
+        <form onSubmit={createGroup} className="my-3 grid gap-2">
+          <input
+            className="w-full rounded border p-2"
+            placeholder="Group name"
+            value={groupForm.name}
+            onChange={e => setGroupForm({ ...groupForm, name: e.target.value })}
+          />
+
+          <input
+            className="w-full rounded border p-2"
+            placeholder="Course, ex: CS 144"
+            value={groupForm.course}
+            onChange={e => setGroupForm({ ...groupForm, course: e.target.value })}
+          />
+
+          <button className="w-full rounded bg-blue-700 p-3 text-white hover:bg-blue-600">
+            Create group
           </button>
-        ))}
+        </form>
+
+        <div className="grid gap-2">
+          {groups.length === 0 && (
+            <p className="text-sm text-slate-500">No groups yet. Create one to start saving notes.</p>
+          )}
+
+          {groups.map(g => (
+            <div
+              key={g.id}
+              className={`flex items-center gap-2 rounded border ${
+                active?.id === g.id
+                  ? 'border-blue-700 bg-blue-50 font-semibold'
+                  : 'border-transparent hover:bg-slate-100'
+              }`}
+            >
+              <button
+                onClick={() => selectGroup(g)}
+                className="flex-1 p-3 text-left"
+              >
+                {g.name}
+                <br />
+                <small>{g.course}</small>
+              </button>
+
+              <button
+                onClick={() => deleteGroup(g.id)}
+                className="mr-2 rounded px-2 py-1 text-xl hover:bg-red-100"
+                aria-label={`Delete ${g.name}`}
+                title="Delete group"
+              >
+                ⋯
+              </button>
+            </div>
+          ))}
+        </div>
       </aside>
 
       <section className="grid gap-4">
         <article className="rounded-2xl bg-white p-4 shadow">
-          <h2 className="font-bold">Collaborative note editor</h2>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="font-bold">Collaborative note editor</h2>
+
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-sm">
+              {active ? `Active group: ${active.name}` : 'No group selected'}
+            </span>
+          </div>
+
+          {!active && (
+            <p className="mt-3 rounded bg-yellow-50 p-3 text-sm text-yellow-800">
+              Create or select a group before saving notes.
+            </p>
+          )}
 
           <input
             className="my-2 w-full rounded border p-3"
             value={note.title}
-            onChange={e => setNote({...note,title:e.target.value})}
+            onChange={e => setNote({ ...note, title: e.target.value })}
           />
 
           <textarea
             className="h-48 w-full rounded border p-3"
             placeholder="Type notes here. This can be saved offline and summarized by AI."
             value={note.body}
-            onChange={e => setNote({...note,body:e.target.value})}
+            onChange={e => setNote({ ...note, body: e.target.value })}
           />
 
           <div className="mt-3 flex flex-wrap gap-2">
-            <button onClick={saveNote} className="rounded bg-slate-900 px-4 py-2 text-white">Save note</button>
-            <button onClick={summarize} className="rounded bg-emerald-700 px-4 py-2 text-white"><Brain className="inline"/> AI summarize</button>
+            <button
+              onClick={saveNote}
+              disabled={!active}
+              className={`rounded px-4 py-2 text-white ${
+                active
+                  ? 'bg-slate-900 hover:bg-slate-700'
+                  : 'cursor-not-allowed bg-slate-400'
+              }`}
+            >
+              Save note
+            </button>
+
+            <button
+              onClick={summarize}
+              className="rounded bg-emerald-700 px-4 py-2 text-white hover:bg-emerald-600"
+            >
+              <Brain className="inline" /> AI summarize
+            </button>
           </div>
         </article>
 
@@ -192,6 +380,23 @@ function Dashboard({ onLogout }) {
           <article className="rounded-2xl bg-white p-4 shadow" aria-live="polite">
             <h2 className="font-bold">AI Output</h2>
             <p className="whitespace-pre-wrap">{summary}</p>
+          </article>
+        )}
+
+        {active && savedNotes.filter(saved => saved.groupId === active.id).length > 0 && (
+          <article className="rounded-2xl bg-white p-4 shadow">
+            <h2 className="font-bold">Saved notes this session</h2>
+
+            <div className="mt-3 grid gap-2">
+              {savedNotes
+                .filter(saved => saved.groupId === active?.id)
+                .map((saved, index) => (
+                <section key={index} className="rounded border p-3">
+                  <h3 className="font-semibold">{saved.title}</h3>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{saved.body}</p>
+                </section>
+              ))}
+            </div>
           </article>
         )}
 

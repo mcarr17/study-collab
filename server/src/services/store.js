@@ -40,6 +40,44 @@ export const store = {
     if (db) await db.collection('groups').doc(id).set(doc); else memory.groups.set(id, doc);
     return doc;
   },
+  async deleteGroup(groupId, userId) {
+    if (db) {
+      const groupRef = db.collection('groups').doc(groupId);
+      const groupSnap = await groupRef.get();
+  
+      if (!groupSnap.exists) return false;
+  
+      const group = groupSnap.data();
+  
+      if (group.ownerId !== userId) return false;
+  
+      await groupRef.delete();
+  
+      const notesSnap = await db.collection('notes').where('groupId', '==', groupId).get();
+      const batch = db.batch();
+  
+      notesSnap.docs.forEach(doc => batch.delete(doc.ref));
+  
+      await batch.commit();
+  
+      return true;
+    }
+  
+    const group = memory.groups.get(groupId);
+  
+    if (!group) return false;
+    if (group.ownerId !== userId) return false;
+  
+    memory.groups.delete(groupId);
+  
+    for (const [noteId, note] of memory.notes.entries()) {
+      if (note.groupId === groupId) {
+        memory.notes.delete(noteId);
+      }
+    }
+  
+    return true;
+  },
   async saveNote(note) {
     const id = note.id || randomUUID();
     const doc = { ...note, id, updatedAt: new Date().toISOString() };
