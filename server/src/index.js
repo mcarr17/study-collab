@@ -51,8 +51,12 @@ const clientDistPath = path.join(__dirname, '../../client/dist');
 
 app.use(express.static(clientDistPath));
 
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(clientDistPath, 'index.html'));
+app.use((req, res, next) => {
+  if (req.method !== 'GET') return next();
+  if (req.path.startsWith('/api')) return next();
+  if (req.path.startsWith('/socket.io')) return next();
+
+  return res.sendFile(path.join(clientDistPath, 'index.html'));
 });
 
 io.use((socket, next) => {
