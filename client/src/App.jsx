@@ -306,7 +306,7 @@ function Dashboard({ onLogout }) {
         const otherGroupNotes = prev.filter(n => n.groupId !== group.id);
         return [...otherGroupNotes, ...notes];
       });
-    } catch (err) {
+    } catch (_err) {
       setToast('Could not load saved notes for this group');
     }
   }
@@ -318,7 +318,7 @@ function Dashboard({ onLogout }) {
       const details = await api(`/api/groups/${active.id}/details`);
       setGroupDetails(details);
       setShowGroupDetails(true);
-    } catch (err) {
+    } catch (_err) {
       setToast('Could not load group details');
     }
   }
@@ -362,7 +362,7 @@ function Dashboard({ onLogout }) {
       }
 
       setToast('Left group');
-    } catch (err) {
+    } catch (_err) {
       setToast('Could not leave group');
     }
   }
@@ -401,7 +401,7 @@ function Dashboard({ onLogout }) {
       });
 
       setToast('Group deleted');
-    } catch (err) {
+    } catch (_err) {
       setToast('Only the group owner can delete this group');
     }
   }
@@ -576,7 +576,7 @@ function Dashboard({ onLogout }) {
       setFlashcardIndex(0);
       setFlashcardFlipped(false);
       setToast('AI study guide ready');
-    } catch (err) {
+    } catch (_err) {
       setToast('AI summary failed');
     } finally {
       setSummarizing(false);
@@ -623,7 +623,7 @@ function Dashboard({ onLogout }) {
       setQuizAnswers([]);
       setQuizFinished(false);
       setToast('Quiz ready');
-    } catch (err) {
+    } catch (_err) {
       setToast('Quiz generation failed');
     } finally {
       setQuizLoading(false);
