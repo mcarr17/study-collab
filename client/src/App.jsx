@@ -108,6 +108,17 @@ function CanvasBoard() {
     />
   </article>;
 }
+function parseFlashcards(summary) {
+  const matches = [...summary.matchAll(/Q:\s*([\s\S]*?)\nA:\s*([\s\S]*?)(?=\n\nQ:|\nPractice Questions|$)/g)];
+
+  return matches.map(match => ({
+    question: match[1].trim(),
+    answer: match[2].trim()
+  }));
+}
+function removeFlashcardsFromSummary(summary) {
+  return summary.replace(/Flashcards[\s\S]*?(?=Practice Questions|$)/i, '').trim();
+}
 
 function Dashboard({ onLogout }) {
   const [groups, setGroups] = useState([]);
@@ -119,6 +130,11 @@ function Dashboard({ onLogout }) {
   const [groupForm, setGroupForm] = useState({ name: '', course: '' });
   const [savedNotes, setSavedNotes] = useState([]);
   const [groupDrafts, setGroupDrafts] = useState({});
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [groupSummaries, setGroupSummaries] = useState({});
+  const [flashcardIndex, setFlashcardIndex] = useState(0);
+  const [flashcardFlipped, setFlashcardFlipped] = useState(false);
+  const [summarizing, setSummarizing] = useState(false);
 
   const socket = useMemo(() => io(API, { auth: { token: getToken() } }), []);
 
@@ -139,40 +155,59 @@ function Dashboard({ onLogout }) {
     };
   }, []);
 
-  function selectGroup(group) {
+  async function selectGroup(group) {
     if (active) {
       setGroupDrafts(prev => ({
         ...prev,
         [active.id]: note
       }));
     }
-  
+
     setActive(group);
     setNote(groupDrafts[group.id] || { title: 'Lecture Notes', body: '' });
-    setSummary('');
+    setEditingNoteId(null);
+    setFlashcardIndex(0);
+    setFlashcardFlipped(false);
+    setSummary(groupSummaries[group.id] || '');
     socket.emit('join-group', group.id);
     setToast(`Selected group: ${group.name}`);
+
+    try {
+      const notes = await api(`/api/groups/${group.id}/notes`);
+      setSavedNotes(prev => {
+        const otherGroupNotes = prev.filter(n => n.groupId !== group.id);
+        return [...otherGroupNotes, ...notes];
+      });
+    } catch (err) {
+      setToast('Could not load saved notes for this group');
+    }
   }
 
   async function deleteGroup(groupId) {
     const ok = window.confirm('Delete this group? This cannot be undone.');
     if (!ok) return;
-  
+
     try {
       await api(`/api/groups/${groupId}`, { method: 'DELETE' });
     } catch (err) {
       console.warn('Backend delete failed, removing from UI only for now.');
     }
-  
+
     setGroups(groups.filter(g => g.id !== groupId));
     setSavedNotes(savedNotes.filter(n => n.groupId !== groupId));
-  
+
     if (active?.id === groupId) {
       setActive(null);
       setNote({ title: 'Lecture Notes', body: '' });
+      setEditingNoteId(null);
       setSummary('');
     }
-  
+
+    setGroupSummaries(prev => {
+      const copy = { ...prev };
+      delete copy[groupId];
+      return copy;
+    });
     setToast('Group deleted');
   }
 
@@ -194,7 +229,10 @@ function Dashboard({ onLogout }) {
 
     setGroups([...groups, group]);
     setActive(group);
+    setSavedNotes(prev => prev.filter(n => n.groupId !== group.id));
+    setSummary('');
     setNote({ title: 'Lecture Notes', body: '' });
+    setEditingNoteId(null);
     setGroupForm({ name: '', course: '' });
     socket.emit('join-group', group.id);
     setToast(`New study group created: ${group.name}`);
@@ -213,6 +251,19 @@ function Dashboard({ onLogout }) {
 
     const payload = { ...note, groupId: active.id };
 
+    if (editingNoteId) {
+      const updated = await api(`/api/groups/${active.id}/notes/${editingNoteId}`, {
+        method: 'PUT',
+        body: JSON.stringify(payload)
+      });
+
+      setSavedNotes(savedNotes.map(n => n.id === editingNoteId ? updated : n));
+      setEditingNoteId(null);
+      setNote({ title: 'Lecture Notes', body: '' });
+      setToast('Note updated');
+      return;
+    }
+
     if (offline) {
       const queued = JSON.parse(localStorage.getItem('queuedNotes') || '[]');
       localStorage.setItem('queuedNotes', JSON.stringify([...queued, payload]));
@@ -221,27 +272,91 @@ function Dashboard({ onLogout }) {
       return;
     }
 
-    await api(`/api/groups/${active.id}/notes`, {
+    const saved = await api(`/api/groups/${active.id}/notes`, {
       method: 'POST',
       body: JSON.stringify(payload)
     });
 
-    setSavedNotes([...savedNotes, payload]);
+    setSavedNotes([...savedNotes, saved]);
+    setNote({ title: 'Lecture Notes', body: '' });
     setToast('Note saved and pushed to your group');
   }
 
+  function editSavedNote(saved) {
+    setEditingNoteId(saved.id);
+    setNote({
+      title: saved.title,
+      body: saved.body
+    });
+    setToast('Editing saved note');
+  }
+
+  async function deleteSavedNote(noteId) {
+    const ok = window.confirm('Delete this note?');
+    if (!ok) return;
+
+    await api(`/api/groups/${active.id}/notes/${noteId}`, {
+      method: 'DELETE'
+    });
+
+    setSavedNotes(savedNotes.filter(n => n.id !== noteId));
+
+    if (editingNoteId === noteId) {
+      setEditingNoteId(null);
+      setNote({ title: 'Lecture Notes', body: '' });
+    }
+
+    setToast('Note deleted');
+  }
+
   async function summarize() {
+    if (!active) {
+      setToast('Select a group before using AI summarize');
+      return;
+    }
+  
     if (!note.body.trim()) {
       setToast('Write notes before using AI summarize');
       return;
     }
+  
+    try {
+      setSummarizing(true);
+      setToast('Generating AI study guide...');
+  
+      const data = await api('/api/ai/summarize', {
+        method: 'POST',
+        body: JSON.stringify({ text: note.body })
+      });
+  
+      const output = data.summary || data.quiz?.join('\n') || 'No summary returned.';
+  
+      setSummary(output);
+  
+      setGroupSummaries(prev => ({
+        ...prev,
+        [active.id]: output
+      }));
+  
+      setFlashcardIndex(0);
+      setFlashcardFlipped(false);
+      setToast('AI study guide ready');
+    } catch (err) {
+      setToast('AI summary failed');
+    } finally {
+      setSummarizing(false);
+    }
+  }
+  const flashcards = parseFlashcards(summary);
 
-    const data = await api('/api/ai/summarize', {
-      method: 'POST',
-      body: JSON.stringify({ text: note.body })
-    });
+  function nextFlashcard() {
+    setFlashcardFlipped(false);
+    setFlashcardIndex((flashcardIndex + 1) % flashcards.length);
+  }
 
-    setSummary(data.summary || data.quiz?.join('\n') || 'No summary returned.');
+  function previousFlashcard() {
+    setFlashcardFlipped(false);
+    setFlashcardIndex((flashcardIndex - 1 + flashcards.length) % flashcards.length);
   }
 
   return <main className="min-h-screen bg-slate-100 text-slate-900">
@@ -341,6 +456,12 @@ function Dashboard({ onLogout }) {
             </p>
           )}
 
+          {editingNoteId && (
+            <p className="mt-3 rounded bg-blue-50 p-3 text-sm text-blue-800">
+              Editing an existing note. Click Update note to save changes.
+            </p>
+          )}
+
           <input
             className="my-2 w-full rounded border p-3"
             value={note.title}
@@ -364,14 +485,36 @@ function Dashboard({ onLogout }) {
                   : 'cursor-not-allowed bg-slate-400'
               }`}
             >
-              Save note
+              {editingNoteId ? 'Update note' : 'Save note'}
             </button>
+
+            {editingNoteId && (
+              <button
+                onClick={() => {
+                  setEditingNoteId(null);
+                  setNote({ title: 'Lecture Notes', body: '' });
+                  setToast('Edit cancelled');
+                }}
+                className="rounded bg-slate-200 px-4 py-2 hover:bg-slate-300"
+              >
+                Cancel edit
+              </button>
+            )}
 
             <button
               onClick={summarize}
+              disabled={summarizing}
               className="rounded bg-emerald-700 px-4 py-2 text-white hover:bg-emerald-600"
             >
-              <Brain className="inline" /> AI summarize
+              {summarizing ? (
+                <>
+                  <span className="inline-block animate-spin">⏳</span> Generating...
+                </>
+              ) : (
+                <>
+                  <Brain className="inline" /> AI summarize
+                </>
+              )}
             </button>
           </div>
         </article>
@@ -379,7 +522,60 @@ function Dashboard({ onLogout }) {
         {summary && (
           <article className="rounded-2xl bg-white p-4 shadow" aria-live="polite">
             <h2 className="font-bold">AI Output</h2>
-            <p className="whitespace-pre-wrap">{summary}</p>
+            <p className="whitespace-pre-wrap">{removeFlashcardsFromSummary(summary)}</p>
+
+            {flashcards.length > 0 && (
+              <section className="mt-4 rounded-xl border bg-slate-50 p-4">
+                <div className="mb-3 flex items-center justify-between">
+                  <h3 className="font-bold">Flashcard Mode</h3>
+                  <span className="text-sm text-slate-600">
+                    Card {flashcardIndex + 1} / {flashcards.length}
+                  </span>
+                </div>
+
+                <button
+                  onClick={() => setFlashcardFlipped(!flashcardFlipped)}
+                  className="min-h-40 w-full rounded-xl bg-white p-6 text-left shadow hover:bg-slate-100"
+                >
+                  <p className="text-xs font-semibold uppercase text-slate-500">
+                    {flashcardFlipped ? 'Answer' : 'Question'}
+                  </p>
+
+                  <p className="mt-3 text-lg font-semibold">
+                    {flashcardFlipped
+                      ? flashcards[flashcardIndex].answer
+                      : flashcards[flashcardIndex].question}
+                  </p>
+
+                  <p className="mt-4 text-sm text-slate-500">
+                    Click card to flip
+                  </p>
+                </button>
+
+                <div className="mt-3 flex justify-between gap-2">
+                  <button
+                    onClick={previousFlashcard}
+                    className="rounded bg-slate-200 px-4 py-2 hover:bg-slate-300"
+                  >
+                    Previous
+                  </button>
+
+                  <button
+                    onClick={() => setFlashcardFlipped(!flashcardFlipped)}
+                    className="rounded bg-blue-700 px-4 py-2 text-white hover:bg-blue-600"
+                  >
+                    Flip
+                  </button>
+
+                  <button
+                    onClick={nextFlashcard}
+                    className="rounded bg-slate-200 px-4 py-2 hover:bg-slate-300"
+                  >
+                    Next
+                  </button>
+                </div>
+              </section>
+            )}
           </article>
         )}
 
@@ -390,12 +586,34 @@ function Dashboard({ onLogout }) {
             <div className="mt-3 grid gap-2">
               {savedNotes
                 .filter(saved => saved.groupId === active?.id)
-                .map((saved, index) => (
-                <section key={index} className="rounded border p-3">
-                  <h3 className="font-semibold">{saved.title}</h3>
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{saved.body}</p>
-                </section>
-              ))}
+                .map(saved => (
+                  <section key={saved.id} className="rounded border p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-semibold">{saved.title}</h3>
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-slate-700">
+                          {saved.body}
+                        </p>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => editSavedNote(saved)}
+                          className="rounded bg-blue-100 px-3 py-1 text-sm hover:bg-blue-200"
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          onClick={() => deleteSavedNote(saved.id)}
+                          className="rounded bg-red-100 px-3 py-1 text-sm hover:bg-red-200"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  </section>
+                ))}
             </div>
           </article>
         )}

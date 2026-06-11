@@ -90,5 +90,39 @@ export const store = {
       return snap.docs.map(d => d.data());
     }
     return [...memory.notes.values()].filter(n => n.groupId === groupId);
+  },
+  
+  async listNotes(groupId) {
+    if (db) {
+      const snap = await db.collection('notes').where('groupId', '==', groupId).get();
+      return snap.docs.map(d => d.data());
+    }
+    return [...memory.notes.values()].filter(n => n.groupId === groupId);
+  },
+
+  async deleteNote(noteId, groupId, userId) {
+    if (db) {
+      const noteRef = db.collection('notes').doc(noteId);
+      const noteSnap = await noteRef.get();
+
+      if (!noteSnap.exists) return false;
+
+      const note = noteSnap.data();
+
+      if (note.groupId !== groupId) return false;
+      if (note.authorId !== userId) return false;
+
+      await noteRef.delete();
+      return true;
+    }
+
+    const note = memory.notes.get(noteId);
+
+    if (!note) return false;
+    if (note.groupId !== groupId) return false;
+    if (note.authorId !== userId) return false;
+
+    memory.notes.delete(noteId);
+    return true;
   }
 };

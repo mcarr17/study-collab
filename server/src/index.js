@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.js';
 import groupsRoutes from './routes/groups.js';
 import aiRoutes from './routes/ai.js';
 import { verifyToken } from './middleware/auth.js';
+import 'dotenv/config';
 
 const app = express();
 const server = http.createServer(app);

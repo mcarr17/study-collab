@@ -29,6 +29,37 @@ router.post('/:groupId/notes', async (req, res) => {
   res.status(201).json(note);
 });
 
+router.put('/:groupId/notes/:noteId', async (req, res) => {
+  const note = await store.saveNote({
+    id: req.params.noteId,
+    groupId: req.params.groupId,
+    title: xss(String(req.body.title || 'Untitled')),
+    body: xss(String(req.body.body || '')),
+    authorId: req.user.id
+  });
+
+  req.app.get('io').to(req.params.groupId).emit('note-saved', note);
+  res.json(note);
+});
+
+router.delete('/:groupId/notes/:noteId', async (req, res) => {
+  const deleted = await store.deleteNote(
+    req.params.noteId,
+    req.params.groupId,
+    req.user.id
+  );
+
+  if (!deleted) {
+    return res.status(404).json({ error: 'Note not found' });
+  }
+
+  req.app.get('io').to(req.params.groupId).emit('note-deleted', {
+    id: req.params.noteId
+  });
+
+  res.json({ ok: true });
+});
+
 router.delete('/:groupId', async (req, res) => {
   const deleted = await store.deleteGroup(req.params.groupId, req.user.id);
 
