@@ -1,4 +1,4 @@
-const API = import.meta.env.VITE_API_URL || '';
+const API = import.meta.env.VITE_API_URL || 'http://8.229.50.65';
 export function getToken() { return localStorage.getItem('token'); }
 export function setToken(token) { localStorage.setItem('token', token); }
 export async function api(path, options = {}) {

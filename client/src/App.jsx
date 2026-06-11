@@ -215,7 +215,13 @@ function Dashboard({ onLogout }) {
   const [groupDetails, setGroupDetails] = useState(null);
   const [showGroupDetails, setShowGroupDetails] = useState(false);
 
-  const socket = useMemo(() => io(API, { auth: { token: getToken() } }), []);
+  const socket = useMemo(
+    () => io(API || window.location.origin, {
+      auth: { token: getToken() },
+      transports: ['polling'],
+    }),
+    []
+  );
 
   async function loadMyGroups() {
     const data = await api('/api/groups');
