@@ -2,6 +2,7 @@ import admin from 'firebase-admin';
 import { randomUUID } from 'crypto';
 
 let db = null;
+
 if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && process.env.FIREBASE_PRIVATE_KEY) {
   admin.initializeApp({ credential: admin.credential.cert({
     projectId: process.env.FIREBASE_PROJECT_ID,
@@ -9,6 +10,12 @@ if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_CLIENT_EMAIL && proc
     privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
   }) });
   db = admin.firestore();
+}
+
+if (db) {
+  console.log('Using Firestore database');
+} else {
+  console.log('Using in-memory database');
 }
 
 const memory = { users: new Map(), groups: new Map(), notes: new Map() };
@@ -28,11 +35,26 @@ export const store = {
     return [...memory.users.values()].find(u => u.email === email) || null;
   },
   async listGroups(userId) {
-    if (db) {
-      const snap = await db.collection('groups').where('memberIds', 'array-contains', userId).get();
-      return snap.docs.map(d => d.data());
+    if (!db) {
+      return Array.from(memory.groups.values())
+        .filter(g => g.memberIds?.includes(userId))
+        .map(g => ({
+          ...g,
+          isOwner: g.ownerId === userId
+        }));
     }
-    return [...memory.groups.values()].filter(g => g.memberIds.includes(userId));
+  
+    const snap = await db.collection('groups')
+      .where('memberIds', 'array-contains', userId)
+      .get();
+  
+    return snap.docs.map(doc => {
+      const group = { id: doc.id, ...doc.data() };
+      return {
+        ...group,
+        isOwner: group.ownerId === userId
+      };
+    });
   },
   async createGroup(group) {
     const id = randomUUID();
@@ -40,41 +62,28 @@ export const store = {
     if (db) await db.collection('groups').doc(id).set(doc); else memory.groups.set(id, doc);
     return doc;
   },
-  async deleteGroup(groupId, userId) {
-    if (db) {
-      const groupRef = db.collection('groups').doc(groupId);
-      const groupSnap = await groupRef.get();
+  async deleteGroup(groupId) {
+    if (!db) {
+      memory.groups.delete(groupId);
   
-      if (!groupSnap.exists) return false;
-  
-      const group = groupSnap.data();
-  
-      if (group.ownerId !== userId) return false;
-  
-      await groupRef.delete();
-  
-      const notesSnap = await db.collection('notes').where('groupId', '==', groupId).get();
-      const batch = db.batch();
-  
-      notesSnap.docs.forEach(doc => batch.delete(doc.ref));
-  
-      await batch.commit();
+      for (const [noteId, note] of memory.notes.entries()) {
+        if (note.groupId === groupId) {
+          memory.notes.delete(noteId);
+        }
+      }
   
       return true;
     }
   
-    const group = memory.groups.get(groupId);
+    await db.collection('groups').doc(groupId).delete();
   
-    if (!group) return false;
-    if (group.ownerId !== userId) return false;
+    const notesSnap = await db.collection('notes')
+      .where('groupId', '==', groupId)
+      .get();
   
-    memory.groups.delete(groupId);
-  
-    for (const [noteId, note] of memory.notes.entries()) {
-      if (note.groupId === groupId) {
-        memory.notes.delete(noteId);
-      }
-    }
+    const batch = db.batch();
+    notesSnap.docs.forEach(doc => batch.delete(doc.ref));
+    await batch.commit();
   
     return true;
   },
@@ -84,14 +93,7 @@ export const store = {
     if (db) await db.collection('notes').doc(id).set(doc, { merge: true }); else memory.notes.set(id, doc);
     return doc;
   },
-  async listNotes(groupId) {
-    if (db) {
-      const snap = await db.collection('notes').where('groupId', '==', groupId).get();
-      return snap.docs.map(d => d.data());
-    }
-    return [...memory.notes.values()].filter(n => n.groupId === groupId);
-  },
-  
+
   async listNotes(groupId) {
     if (db) {
       const snap = await db.collection('notes').where('groupId', '==', groupId).get();
@@ -124,5 +126,94 @@ export const store = {
 
     memory.notes.delete(noteId);
     return true;
-  }
+  },
+  async findUserById(userId) {
+    if (db) {
+      const snap = await db.collection('users').doc(userId).get();
+      return snap.exists ? snap.data() : null;
+    }
+  
+    return memory.users.get(userId) || null;
+  },
+  
+  async getGroup(groupId) {
+    if (db) {
+      const snap = await db.collection('groups').doc(groupId).get();
+      return snap.exists ? snap.data() : null;
+    }
+  
+    return memory.groups.get(groupId) || null;
+  },
+  
+  async listAllGroups() {
+    if (db) {
+      const snap = await db.collection('groups').get();
+      return snap.docs.map(d => d.data());
+    }
+  
+    return [...memory.groups.values()];
+  },
+  
+  async joinGroup(groupId, userId) {
+    if (db) {
+      const groupRef = db.collection('groups').doc(groupId);
+      const groupSnap = await groupRef.get();
+  
+      if (!groupSnap.exists) return null;
+  
+      const group = groupSnap.data();
+      const memberIds = group.memberIds || [];
+  
+      if (!memberIds.includes(userId)) {
+        memberIds.push(userId);
+        await groupRef.update({ memberIds });
+      }
+  
+      return { ...group, memberIds };
+    }
+  
+    const group = memory.groups.get(groupId);
+    if (!group) return null;
+  
+    group.memberIds = group.memberIds || [];
+  
+    if (!group.memberIds.includes(userId)) {
+      group.memberIds.push(userId);
+    }
+  
+    memory.groups.set(groupId, group);
+    return group;
+  },
+  
+  async leaveGroup(groupId, userId) {
+    if (db) {
+      const groupRef = db.collection('groups').doc(groupId);
+      const groupSnap = await groupRef.get();
+  
+      if (!groupSnap.exists) return null;
+  
+      const group = groupSnap.data();
+  
+      if (group.ownerId === userId) {
+        return { error: 'OWNER_CANNOT_LEAVE' };
+      }
+  
+      const memberIds = (group.memberIds || []).filter(id => id !== userId);
+      await groupRef.update({ memberIds });
+  
+      return { ...group, memberIds };
+    }
+  
+    const group = memory.groups.get(groupId);
+    if (!group) return null;
+  
+    if (group.ownerId === userId) {
+      return { error: 'OWNER_CANNOT_LEAVE' };
+    }
+  
+    group.memberIds = (group.memberIds || []).filter(id => id !== userId);
+    memory.groups.set(groupId, group);
+  
+    return group;
+  },
 };

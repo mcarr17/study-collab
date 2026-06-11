@@ -5,7 +5,11 @@ import xss from 'xss';
 import { store } from '../services/store.js';
 
 const router = express.Router();
-const secret = process.env.JWT_SECRET || 'dev-only-change-me';
+const secret = process.env.JWT_SECRET;
+
+if (!secret) {
+  throw new Error('JWT_SECRET is required');
+}
 
 function issueToken(user) {
   return jwt.sign({ id: user.id, email: user.email, name: user.name }, secret, { expiresIn: '2h' });
@@ -34,7 +38,12 @@ router.post('/login', async (req, res) => {
 });
 
 router.post('/logout', (_req, res) => {
-  res.clearCookie('token');
+  res.clearCookie('token', {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: process.env.NODE_ENV === 'production'
+  });
+
   res.json({ ok: true });
 });
 

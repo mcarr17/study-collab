@@ -1,6 +1,10 @@
 import jwt from 'jsonwebtoken';
 
-const secret = process.env.JWT_SECRET || 'dev-only-change-me';
+const secret = process.env.JWT_SECRET;
+
+if (!secret) {
+  throw new Error('JWT_SECRET environment variable is required');
+}
 
 function raw(token) {
   return jwt.verify(token, secret);

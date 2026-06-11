@@ -10,14 +10,13 @@ import authRoutes from './routes/auth.js';
 import groupsRoutes from './routes/groups.js';
 import aiRoutes from './routes/ai.js';
 import { verifyToken } from './middleware/auth.js';
-import 'dotenv/config';
 
 const app = express();
 const server = http.createServer(app);
 const allowedOrigin = [
   process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   'http://192.168.254.18:5173',
-];
+].filter(Boolean);
 const io = new Server(server, {
   cors: { origin: allowedOrigin, credentials: true }
 });
@@ -25,7 +24,7 @@ const io = new Server(server, {
 app.set('io', io);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: allowedOrigin, credentials: true }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
 
@@ -45,12 +44,26 @@ io.use((socket, next) => {
   }
 });
 
-io.on('connection', socket => {
-  socket.on('join-group', groupId => socket.join(groupId));
-  socket.on('send-message', payload => {
-    const message = { ...payload, userId: socket.user.id, createdAt: new Date().toISOString() };
-    io.to(payload.groupId).emit('message-created', message);
-    io.to(payload.groupId).emit('server-notification', { text: `New message in ${payload.groupName || 'your group'}` });
+io.on('connection', (socket) => {
+  console.log('socket connected', socket.id);
+
+  socket.on('join-group', (groupId) => {
+    socket.join(`group:${groupId}`);
+  });
+
+  socket.on('leave-group', (groupId) => {
+    socket.leave(`group:${groupId}`);
+  });
+
+  socket.on('note-draft-change', ({ groupId, text }) => {
+    socket.to(`group:${groupId}`).emit('note-draft-updated', {
+      groupId,
+      text,
+    });
+  });
+
+  socket.on('disconnect', () => {
+    console.log('socket disconnected', socket.id);
   });
 });
 

@@ -47,7 +47,7 @@ router.post('/summarize', async (req, res) => {
     }
 
     const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
     const prompt = `
 You are an AI study assistant.
@@ -92,6 +92,68 @@ ${text}
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'AI summary failed' });
+  }
+});
+
+router.post('/quiz', async (req, res) => {
+  try {
+    const text = String(req.body.text || '').slice(0, 12000);
+
+    if (!text.trim()) {
+      return res.status(400).json({ error: 'Text required' });
+    }
+
+    if (!process.env.GEMINI_API_KEY) {
+      return res.json({
+        questions: [
+          {
+            question: 'What is the main idea of these notes?',
+            choices: ['A key concept', 'An unrelated topic', 'A random detail', 'None of the above'],
+            answerIndex: 0
+          }
+        ]
+      });
+    }
+
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+
+    const prompt = `
+Create a 5-question multiple choice quiz from these study notes.
+
+Return ONLY valid JSON.
+No markdown.
+No explanation.
+
+Format:
+{
+  "questions": [
+    {
+      "question": "Question text",
+      "choices": ["Choice A", "Choice B", "Choice C", "Choice D"],
+      "answerIndex": 0
+    }
+  ]
+}
+
+Rules:
+- Exactly 5 questions.
+- Each question has exactly 4 choices.
+- answerIndex must be 0, 1, 2, or 3.
+- Questions should test understanding, not memorization.
+
+Study notes:
+${text}
+`;
+
+    const result = await model.generateContent(prompt);
+    const raw = result.response.text().replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(raw);
+
+    res.json(parsed);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Quiz generation failed' });
   }
 });
 
