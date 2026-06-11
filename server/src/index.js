@@ -10,6 +10,9 @@ import authRoutes from './routes/auth.js';
 import groupsRoutes from './routes/groups.js';
 import aiRoutes from './routes/ai.js';
 import { verifyToken } from './middleware/auth.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
 
 const app = express();
 const server = http.createServer(app);
@@ -24,14 +27,33 @@ const io = new Server(server, {
 app.set('io', io);
 app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: allowedOrigin, credentials: true }));
+
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    service: 'ai-study-collab',
+    hostname: process.env.HOSTNAME || 'local'
+  });
+});
+
 app.use(express.json({ limit: '5mb' }));
 app.use(cookieParser());
 app.use(rateLimit({ windowMs: 60_000, limit: 120 }));
 
-app.get('/healthz', (_req, res) => res.json({ ok: true }));
 app.use('/api/auth', authRoutes);
 app.use('/api/groups', verifyToken, groupsRoutes);
 app.use('/api/ai', verifyToken, aiRoutes);
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDistPath = path.join(__dirname, '../../client/dist');
+
+app.use(express.static(clientDistPath));
+
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(clientDistPath, 'index.html'));
+});
 
 io.use((socket, next) => {
   const token = socket.handshake.auth?.token;

@@ -13,28 +13,34 @@ spec:
         app: ai-study-collab
     spec:
       containers:
-        - name: app
-          image: gcr.io/YOUR_GCP_PROJECT/ai-study-collab:latest
+        - name: ai-study-collab
+          image: us-west1-docker.pkg.dev/cs144-proj2-tests/ai-study-collab-repo/ai-study-collab:v1
           ports:
             - containerPort: 8080
           envFrom:
             - secretRef:
                 name: ai-study-collab-secrets
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: CLIENT_ORIGIN
+              value: "*"
           readinessProbe:
             httpGet:
               path: /healthz
               port: 8080
             initialDelaySeconds: 10
             periodSeconds: 10
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: ai-study-collab-service
-spec:
-  type: LoadBalancer
-  selector:
-    app: ai-study-collab
-  ports:
-    - port: 80
-      targetPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "25m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "192Mi"
