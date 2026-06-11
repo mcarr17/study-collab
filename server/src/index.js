@@ -21,8 +21,7 @@ const allowedOrigin = [
   'http://192.168.254.18:5173',
   'http://8.229.50.65',
   'https://team24.cs144.org',
-].filter(Boolean);git add server/src/index.js
-
+].filter(Boolean);
 const io = new Server(server, {
   cors: { origin: allowedOrigin, credentials: true }
 });
