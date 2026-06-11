@@ -189,6 +189,20 @@ function removeFlashcardsFromSummary(summary) {
   return summary.replace(/Flashcards[\s\S]*?(?=Practice Questions|$)/i, '').trim();
 }
 
+const QUEUED_NOTES_KEY = 'queuedNotes';
+
+function readQueuedNotes() {
+  try {
+    return JSON.parse(localStorage.getItem(QUEUED_NOTES_KEY) || '[]');
+  } catch (_err) {
+    return [];
+  }
+}
+
+function writeQueuedNotes(notes) {
+  localStorage.setItem(QUEUED_NOTES_KEY, JSON.stringify(notes));
+}
+
 function Dashboard({ onLogout }) {
   const [groups, setGroups] = useState([]);
   const [active, setActive] = useState(null);
@@ -235,13 +249,64 @@ function Dashboard({ onLogout }) {
     return data;
   }
 
+  async function syncQueuedNotes() {
+    if (!navigator.onLine) return;
+
+    const queued = readQueuedNotes();
+    if (queued.length === 0) return;
+
+    const remaining = [];
+    const synced = [];
+
+    for (const queuedNote of queued) {
+      try {
+        const { id: _id, localId, queued: _queued, ...noteToSave } = queuedNote;
+        const saved = await api(`/api/groups/${queuedNote.groupId}/notes`, {
+          method: 'POST',
+          body: JSON.stringify(noteToSave),
+        });
+
+        synced.push({ localId, saved });
+      } catch (_err) {
+        remaining.push(queuedNote);
+      }
+    }
+
+    writeQueuedNotes(remaining);
+
+    if (synced.length > 0) {
+      setSavedNotes(prev => {
+        const syncedLocalIds = new Set(synced.map(item => item.localId));
+        const withoutSyncedLocalNotes = prev.filter(saved => !syncedLocalIds.has(saved.localId));
+        const existingIds = new Set(withoutSyncedLocalNotes.map(saved => saved.id));
+        const syncedServerNotes = synced
+          .map(item => item.saved)
+          .filter(saved => !existingIds.has(saved.id));
+
+        return [...withoutSyncedLocalNotes, ...syncedServerNotes];
+      });
+    }
+
+    if (synced.length > 0 && remaining.length === 0) {
+      setToast('Offline notes synced successfully');
+    } else if (synced.length > 0) {
+      setToast('Some offline notes synced; others will retry later');
+    } else if (remaining.length > 0) {
+      setToast('Offline notes could not sync yet');
+    }
+  }
+
   useEffect(() => {
     loadMyGroups().catch(() => {});
     loadPublicGroups().catch(() => {});
+    syncQueuedNotes();
 
     socket.on('server-notification', n => setToast(n.text));
 
-    const on = () => setOffline(false);
+    const on = () => {
+      setOffline(false);
+      syncQueuedNotes();
+    };
     const off = () => setOffline(true);
 
     addEventListener('online', on);
@@ -287,6 +352,8 @@ function Dashboard({ onLogout }) {
       socket.off('note-draft-updated', handleDraftUpdate);
     };
   }, [socket, active?.id, note.title, editingNoteId]);
+  
+  
 
   async function selectGroup(group) {
     if (active) {
@@ -310,7 +377,11 @@ function Dashboard({ onLogout }) {
       const notes = await api(`/api/groups/${group.id}/notes`);
       setSavedNotes(prev => {
         const otherGroupNotes = prev.filter(n => n.groupId !== group.id);
-        return [...otherGroupNotes, ...notes];
+        const queuedForGroup = readQueuedNotes().filter(n => n.groupId === group.id);
+        const serverNoteIds = new Set(notes.map(n => n.id));
+        const localQueuedNotes = queuedForGroup.filter(n => !serverNoteIds.has(n.id));
+
+        return [...otherGroupNotes, ...notes, ...localQueuedNotes];
       });
     } catch (_err) {
       setToast('Could not load saved notes for this group');
@@ -458,6 +529,11 @@ function Dashboard({ onLogout }) {
     const payload = { ...note, groupId: active.id };
 
     if (editingNoteId) {
+      if (offline) {
+        setToast('Go back online before updating an existing note');
+        return;
+      }
+
       const updated = await api(`/api/groups/${active.id}/notes/${editingNoteId}`, {
         method: 'PUT',
         body: JSON.stringify(payload)
@@ -471,9 +547,22 @@ function Dashboard({ onLogout }) {
     }
 
     if (offline) {
-      const queued = JSON.parse(localStorage.getItem('queuedNotes') || '[]');
-      localStorage.setItem('queuedNotes', JSON.stringify([...queued, payload]));
-      setSavedNotes([...savedNotes, payload]);
+      const localId = `queued-${Date.now()}`;
+      const queuedNote = {
+        ...payload,
+        id: localId,
+        localId,
+        queued: true,
+      };
+      const queued = readQueuedNotes();
+
+      writeQueuedNotes([...queued, queuedNote]);
+      setSavedNotes(prev => [...prev, queuedNote]);
+      setNote({ title: 'Lecture Notes', body: '' });
+      setGroupDrafts(prev => ({
+        ...prev,
+        [active.id]: { title: 'Lecture Notes', body: '' }
+      }));
       setToast('Offline: note queued for later sync');
       return;
     }
@@ -1134,7 +1223,14 @@ function Dashboard({ onLogout }) {
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h3 className="font-semibold">{saved.title}</h3>
+                      <h3 className="font-semibold">
+                        {saved.title}
+                        {saved.queued && (
+                          <span className="ml-2 rounded bg-yellow-100 px-2 py-1 text-xs text-yellow-800">
+                            queued offline
+                          </span>
+                        )}
+                      </h3>
                       {saved.type === 'image' ? (
                         <div className="mt-2">
                           <img
