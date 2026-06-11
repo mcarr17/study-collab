@@ -1,27 +1,55 @@
 name: Build Test Deploy
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
+
 jobs:
   build-test-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm install
-      - run: npm run build
-      - run: npm run lint
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build app
+        run: npm run build
+
+      - name: Lint app
+        run: npm run lint
+
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - run: gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT }}/ai-study-collab:latest
-      - uses: google-github-actions/get-gke-credentials@v2
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push Docker image
+        run: |
+          gcloud builds submit \
+            --tag us-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/ai-study-collab-repo/ai-study-collab:latest
+
+      - name: Get GKE credentials
+        uses: google-github-actions/get-gke-credentials@v2
         with:
           cluster_name: ${{ secrets.GKE_CLUSTER }}
           location: ${{ secrets.GKE_ZONE }}
-      - run: kubectl apply -f k8s/deployment.yaml
-      - run: kubectl rollout status deployment/ai-study-collab
+
+      - name: Deploy Kubernetes manifests
+        run: kubectl apply -f k8s/
+
+      - name: Restart deployment to pull latest image
+        run: kubectl rollout restart deployment/ai-study-collab
+
+      - name: Wait for rollout
+        run: kubectl rollout status deployment/ai-study-collab
