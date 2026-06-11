@@ -37,7 +37,7 @@ jobs:
       - name: Build and push Docker image
         run: |
           gcloud builds submit \
-            --tag us-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/ai-study-collab-repo/ai-study-collab:latest
+            --tag us-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/ai-study-collab-repo/ai-study-collab:${{ github.sha }}
 
       - name: Get GKE credentials
         uses: google-github-actions/get-gke-credentials@v2
@@ -48,8 +48,10 @@ jobs:
       - name: Deploy Kubernetes manifests
         run: kubectl apply -f k8s/
 
-      - name: Restart deployment to pull latest image
-        run: kubectl rollout restart deployment/ai-study-collab
+      - name: Update deployment image
+        run: |
+          kubectl set image deployment/ai-study-collab \
+            ai-study-collab=us-west1-docker.pkg.dev/${{ secrets.GCP_PROJECT }}/ai-study-collab-repo/ai-study-collab:${{ github.sha }}
 
       - name: Wait for rollout
         run: kubectl rollout status deployment/ai-study-collab
