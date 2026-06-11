@@ -19,7 +19,10 @@ const server = http.createServer(app);
 const allowedOrigin = [
   process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   'http://192.168.254.18:5173',
-].filter(Boolean);
+  'http://8.229.50.65',
+  'https://team24.cs144.org',
+].filter(Boolean);git add server/src/index.js
+
 const io = new Server(server, {
   cors: { origin: allowedOrigin, credentials: true }
 });
