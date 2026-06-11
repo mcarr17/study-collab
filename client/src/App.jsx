@@ -218,7 +218,7 @@ function Dashboard({ onLogout }) {
   const socket = useMemo(
     () => io(API || window.location.origin, {
       auth: { token: getToken() },
-      transports: ['polling'],
+      transports: ['websocket'],
     }),
     []
   );
